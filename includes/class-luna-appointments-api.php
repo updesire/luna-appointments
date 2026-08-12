@@ -21,6 +21,7 @@ final class Luna_Appointments_API {
 	const FILTER_FINANCE_QUOTE = 'luna_appointments_booking_finance_quote';
 	const FILTER_FINANCE_PREPARE = 'luna_appointments_prepare_booking_finance_commit';
 	const FILTER_FRONTEND_CONFIG = 'luna_appointments_booking_frontend_config';
+	const EVENT_CONSULTATION_FINANCE_NOTIFICATION = 'luna_appointments_consultation_finance_notification';
 
 	public static function get_booking($booking_id) {
 		return Luna_Appointments_Bookings_Table::get_booking((int) $booking_id);
@@ -80,6 +81,14 @@ final class Luna_Appointments_API {
 
 	public static function service_meta($service_id) {
 		return Luna_Appointments_Services::get_service_meta_values((int) $service_id);
+	}
+
+	public static function consultation_finance_plan($service_id) {
+		return class_exists('Luna_Appointments_Consultation_Finance') ? Luna_Appointments_Consultation_Finance::service_plan((int) $service_id) : array();
+	}
+
+	public static function consultation_finance_summary($booking_id) {
+		return class_exists('Luna_Appointments_Consultation_Finance') ? Luna_Appointments_Consultation_Finance::summary((int) $booking_id) : array();
 	}
 
 	public static function is_booking_order_pay_context($order) {

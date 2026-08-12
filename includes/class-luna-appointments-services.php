@@ -229,6 +229,7 @@ class Luna_Appointments_Services {
 		self::render_checkbox_field('نیازمند مشاوره', 'luna_service_requires_consultation', ! empty($values['_luna_service_requires_consultation']), 'اگر این خدمت نیاز به تایید اولیه یا مشاوره دارد، فعالش کنید.');
 		self::render_checkbox_field('فعال برای رزرو', 'luna_service_is_active', ! empty($values['_luna_service_is_active']), 'برای مخفی شدن این خدمت از رزروهای بعدی، این گزینه را غیرفعال کنید.');
 		echo '</div>';
+		do_action('luna_appointments_service_finance_fields', $post, $values);
 		self::render_specialists_field($values['_luna_service_specialist_ids']);
 		echo '</div>';
 	}

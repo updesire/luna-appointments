@@ -20,6 +20,7 @@ final class Luna_Appointments_I18n {
 		$labels = array(
 			'pending' => 'در انتظار پرداخت', 'unpaid' => 'پرداخت نشده',
 			'authorized' => 'در انتظار تایید پرداخت', 'paid' => 'پرداخت شده',
+			'deposit_paid' => 'هزینه اولیه پرداخت شده؛ مانده در انتظار تسویه',
 			'not_required' => 'بدون نیاز به پرداخت', 'failed' => 'پرداخت ناموفق',
 			'cancelled' => 'پرداخت لغو شده', 'partial_refund' => 'بازپرداخت جزئی', 'partially_refunded' => 'بازپرداخت جزئی',
 			'refunded' => 'بازپرداخت شده',

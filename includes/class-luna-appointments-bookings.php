@@ -677,8 +677,13 @@ class Luna_Appointments_Bookings {
 		$base_price       = isset($service_meta['_luna_service_base_price']) ? (int) $service_meta['_luna_service_base_price'] : 0;
 		$price_label      = isset($service_meta['_luna_service_price_label']) ? trim((string) $service_meta['_luna_service_price_label']) : '';
 		$requires_consultation = ! empty($service_meta['_luna_service_requires_consultation']);
+		$consultation_plan = class_exists('Luna_Appointments_Consultation_Finance') ? Luna_Appointments_Consultation_Finance::service_plan((int) $service_post->ID) : array('mode' => 'no_payment', 'upfront_fee' => 0);
+		$has_consultation_fee = $requires_consultation && 'upfront_fee' === (string) ($consultation_plan['mode'] ?? '') && (float) ($consultation_plan['upfront_fee'] ?? 0) > 0;
 		$booking_code      = self::generate_booking_code();
-		$normalized_method = $requires_consultation ? 'consultation' : self::normalize_payment_method($payment_method);
+		$normalized_method = $requires_consultation && ! $has_consultation_fee ? 'consultation' : self::normalize_payment_method($payment_method);
+		if ($has_consultation_fee && in_array($normalized_method, array('cod', 'onsite', 'consultation'), true)) {
+			wp_send_json_error(array('message' => __('هزینه اولیه مشاوره باید پیش از ثبت نهایی و از طریق روش پرداخت غیرحضوری پرداخت شود.', 'luna-appointments')), 400);
+		}
 		$finance_context   = array(
 			'booking_code'     => $booking_code,
 			'service_id'       => (int) $service_post->ID,
@@ -701,7 +706,7 @@ class Luna_Appointments_Bookings {
 			'payment_method'   => $normalized_method,
 			'language'         => $language,
 		);
-		$finance_quote     = $requires_consultation
+		$finance_quote     = $requires_consultation && ! $has_consultation_fee
 			? array(
 				'base_amount'     => 0,
 				'discount_amount' => 0,
@@ -711,9 +716,9 @@ class Luna_Appointments_Bookings {
 				'price_label'     => __('پس از مشاوره تعیین می‌شود', 'luna-appointments'),
 				'meta'            => array('consultation' => true),
 			)
-			: self::get_booking_finance_quote($finance_context);
-		$status         = $requires_consultation ? 'consultation_pending' : 'pending_payment';
-		$payment_status = $requires_consultation ? 'not_required' : 'pending';
+			: ($has_consultation_fee ? Luna_Appointments_Consultation_Finance::initial_quote((int) $service_post->ID, $base_price) : self::get_booking_finance_quote($finance_context));
+		$status         = $requires_consultation && ! $has_consultation_fee ? 'consultation_pending' : 'pending_payment';
+		$payment_status = $requires_consultation && ! $has_consultation_fee ? 'not_required' : 'pending';
 
 		if (! $requires_consultation && $base_price <= 0 && 'cod' !== $normalized_method) {
 			wp_send_json_error(
@@ -774,7 +779,7 @@ class Luna_Appointments_Bookings {
 
 		self::upsert_booking_post_from_row_id((int) $booking_id);
 
-		if ($requires_consultation) {
+		if ($requires_consultation && ! $has_consultation_fee) {
 			$created_booking = Luna_Appointments_Bookings_Table::get_booking_with_context((int) $booking_id);
 			if (is_array($created_booking)) {
 				self::maybe_send_booking_lifecycle_notification('created', $created_booking, null, 'consultation_booking');
@@ -854,6 +859,7 @@ class Luna_Appointments_Bookings {
 				'price_label'      => $price_label,
 				'payment_method'   => $normalized_method,
 				'finance_quote'    => $finance_quote,
+				'consultation_plan'=> $consultation_plan,
 			)
 		);
 
@@ -912,7 +918,9 @@ class Luna_Appointments_Bookings {
 				'paymentLabel'   => self::get_payment_label($normalized_method),
 				'pricing'        => $finance_quote,
 				'status'         => $status,
-				'message'        => __('رزرو شما با موفقیت ثبت شد و سفارش پرداخت ووکامرس آماده است.', 'luna-appointments'),
+				'isConsultation' => $requires_consultation,
+				'isConsultationFee' => $has_consultation_fee,
+				'message'        => $has_consultation_fee ? __('رزرو مشاوره ثبت شد و سفارش پرداخت هزینه اولیه آماده است.', 'luna-appointments') : __('رزرو شما با موفقیت ثبت شد و سفارش پرداخت ووکامرس آماده است.', 'luna-appointments'),
 			)
 		);
 	}
@@ -1212,7 +1220,9 @@ class Luna_Appointments_Bookings {
 			echo '<td data-title="' . esc_attr__('خدمت', 'luna-appointments') . '">' . esc_html($service_name) . '</td>';
 			echo '<td data-title="' . esc_attr__('متخصص', 'luna-appointments') . '">' . esc_html($spec_name) . '</td>';
 			echo '<td data-title="' . esc_attr__('زمان', 'luna-appointments') . '">' . esc_html($datetime) . '</td>';
-			echo '<td data-title="' . esc_attr__('وضعیت', 'luna-appointments') . '">' . esc_html(self::format_account_status_label($status, $pay_status)) . '</td>';
+			echo '<td data-title="' . esc_attr__('وضعیت', 'luna-appointments') . '">' . esc_html(self::format_account_status_label($status, $pay_status));
+			if (class_exists('Luna_Appointments_Consultation_Finance')) echo Luna_Appointments_Consultation_Finance::frontend_summary_markup($booking_id);
+			echo '</td>';
 			echo '<td data-title="' . esc_attr__('عملیات', 'luna-appointments') . '">';
 
                         if ($booking_id > 0) {
@@ -2503,7 +2513,7 @@ class Luna_Appointments_Bookings {
                 echo '<label style="display:grid;gap:6px;"><span>' . esc_html__('از تاریخ', 'luna-appointments') . '</span><input type="date" name="from_date" value="' . esc_attr($from_date) . '"></label>';
                 echo '<label style="display:grid;gap:6px;"><span>' . esc_html__('تا تاریخ', 'luna-appointments') . '</span><input type="date" name="to_date" value="' . esc_attr($to_date) . '"></label>';
                 echo '<label style="display:grid;gap:6px;"><span>' . esc_html__('وضعیت رزرو', 'luna-appointments') . '</span><select name="status"><option value="">' . esc_html__('همه', 'luna-appointments') . '</option><option value="pending_payment"' . selected($status, 'pending_payment', false) . '>' . esc_html__('در انتظار پرداخت', 'luna-appointments') . '</option><option value="payment_review"' . selected($status, 'payment_review', false) . '>' . esc_html__('در انتظار بررسی', 'luna-appointments') . '</option><option value="consultation_pending"' . selected($status, 'consultation_pending', false) . '>' . esc_html__('در انتظار مشاوره', 'luna-appointments') . '</option><option value="confirmed"' . selected($status, 'confirmed', false) . '>' . esc_html__('تایید شده', 'luna-appointments') . '</option><option value="cancelled"' . selected($status, 'cancelled', false) . '>' . esc_html__('لغو شده', 'luna-appointments') . '</option><option value="failed"' . selected($status, 'failed', false) . '>' . esc_html__('ناموفق', 'luna-appointments') . '</option><option value="refunded"' . selected($status, 'refunded', false) . '>' . esc_html__('برگشت', 'luna-appointments') . '</option></select></label>';
-                echo '<label style="display:grid;gap:6px;"><span>' . esc_html__('وضعیت پرداخت', 'luna-appointments') . '</span><select name="payment_status"><option value="">' . esc_html__('همه', 'luna-appointments') . '</option><option value="pending"' . selected($payment_status, 'pending', false) . '>' . esc_html__('در انتظار پرداخت', 'luna-appointments') . '</option><option value="not_required"' . selected($payment_status, 'not_required', false) . '>' . esc_html__('بدون نیاز به پرداخت', 'luna-appointments') . '</option><option value="authorized"' . selected($payment_status, 'authorized', false) . '>' . esc_html__('در انتظار تایید پرداخت', 'luna-appointments') . '</option><option value="paid"' . selected($payment_status, 'paid', false) . '>' . esc_html__('پرداخت شده', 'luna-appointments') . '</option><option value="failed"' . selected($payment_status, 'failed', false) . '>' . esc_html__('ناموفق', 'luna-appointments') . '</option><option value="cancelled"' . selected($payment_status, 'cancelled', false) . '>' . esc_html__('لغو شده', 'luna-appointments') . '</option><option value="refunded"' . selected($payment_status, 'refunded', false) . '>' . esc_html__('برگشت', 'luna-appointments') . '</option></select></label>';
+                echo '<label style="display:grid;gap:6px;"><span>' . esc_html__('وضعیت پرداخت', 'luna-appointments') . '</span><select name="payment_status"><option value="">' . esc_html__('همه', 'luna-appointments') . '</option><option value="pending"' . selected($payment_status, 'pending', false) . '>' . esc_html__('در انتظار پرداخت', 'luna-appointments') . '</option><option value="deposit_paid"' . selected($payment_status, 'deposit_paid', false) . '>' . esc_html__('هزینه اولیه پرداخت شده', 'luna-appointments') . '</option><option value="not_required"' . selected($payment_status, 'not_required', false) . '>' . esc_html__('بدون نیاز به پرداخت', 'luna-appointments') . '</option><option value="authorized"' . selected($payment_status, 'authorized', false) . '>' . esc_html__('در انتظار تایید پرداخت', 'luna-appointments') . '</option><option value="paid"' . selected($payment_status, 'paid', false) . '>' . esc_html__('پرداخت شده', 'luna-appointments') . '</option><option value="failed"' . selected($payment_status, 'failed', false) . '>' . esc_html__('ناموفق', 'luna-appointments') . '</option><option value="cancelled"' . selected($payment_status, 'cancelled', false) . '>' . esc_html__('لغو شده', 'luna-appointments') . '</option><option value="refunded"' . selected($payment_status, 'refunded', false) . '>' . esc_html__('برگشت', 'luna-appointments') . '</option></select></label>';
                 echo '<label style="display:grid;gap:6px;grid-column:1 / span 3;"><span>' . esc_html__('جستجو', 'luna-appointments') . '</span><input type="text" name="s" value="' . esc_attr($search) . '" placeholder="' . esc_attr__('کد رزرو، نام مشتری، موبایل، ایمیل، خدمت یا متخصص', 'luna-appointments') . '"></label>';
                 echo '<div style="display:flex;gap:10px;justify-content:flex-end;">';
                 echo '<button type="submit" class="button">' . esc_html__('اعمال فیلتر', 'luna-appointments') . '</button>';
@@ -3193,7 +3203,7 @@ class Luna_Appointments_Bookings {
 
 		echo '<select name="luna_payment_status" class="postform">';
 		echo '<option value="">' . esc_html__('همه پرداخت‌ها', 'luna-appointments') . '</option>';
-		foreach (array('paid', 'pending', 'authorized', 'failed', 'cancelled', 'refunded', 'partial_refund') as $opt) {
+		foreach (array('paid', 'deposit_paid', 'pending', 'authorized', 'failed', 'cancelled', 'refunded', 'partial_refund') as $opt) {
 			$label = self::format_status_label('', $opt);
 			$label = strpos($label, '/') !== false ? trim(explode('/', $label)[1]) : $opt;
 			echo '<option value="' . esc_attr($opt) . '"' . selected($payment_status, $opt, false) . '>' . esc_html($label) . '</option>';
@@ -4160,6 +4170,10 @@ class Luna_Appointments_Bookings {
 			return __('پرداخت شده', 'luna-appointments');
 		}
 
+		if ('deposit_paid' === $pay) {
+			return __('هزینه اولیه پرداخت شده؛ در انتظار مشاوره', 'luna-appointments');
+		}
+
 		if (in_array($status, array('completed', 'done'), true)) {
 			return __('انجام شده', 'luna-appointments');
 		}
@@ -4777,7 +4791,8 @@ class Luna_Appointments_Bookings {
 			: wc_price($amount);
 		$fee_item       = new WC_Order_Item_Fee();
 
-		$fee_item->set_name(sprintf(__('رزرو: %s', 'luna-appointments'), $display_name));
+		$is_consultation_fee = ! empty($finance_quote['meta']['consultation_finance']);
+		$fee_item->set_name($is_consultation_fee ? sprintf(__('هزینه اولیه مشاوره: %s', 'luna-appointments'), $display_name) : sprintf(__('رزرو: %s', 'luna-appointments'), $display_name));
 		$fee_item->set_amount($amount);
 		$fee_item->set_total($amount);
 		$order->add_item($fee_item);
@@ -4993,6 +5008,7 @@ class Luna_Appointments_Bookings {
 		$current_status = sanitize_key((string) ($booking['status'] ?? ''));
 		$payment_status = self::map_booking_payment_status_from_order($order);
 		$method         = sanitize_key((string) $order->get_payment_method());
+		$is_consultation_deposit = 'yes' === (string) $order->get_meta('_luna_consultation_finance', true);
 
 		if (in_array($current_status, array('completed', 'done'), true)) {
 			return array('status' => $current_status, 'payment_status' => $payment_status);
@@ -5007,6 +5023,9 @@ class Luna_Appointments_Bookings {
 			return array('status' => 'cancelled', 'payment_status' => $payment_status);
 		}
 		if ($order->is_paid()) {
+			if ($is_consultation_deposit) {
+				return array('status' => 'consultation_pending', 'payment_status' => 'deposit_paid');
+			}
 			return array('status' => 'confirmed', 'payment_status' => $payment_status);
 		}
 		if ('on-hold' === $order_status) {

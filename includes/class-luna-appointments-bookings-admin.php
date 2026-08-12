@@ -895,7 +895,7 @@ class Luna_Appointments_Bookings_Admin {
 	 * @return string
 	 */
 	protected static function format_status_label($status) {
-		$payment_states = array('unpaid', 'paid', 'authorized', 'not_required', 'partial_refund', 'partially_refunded');
+		$payment_states = array('unpaid', 'paid', 'deposit_paid', 'authorized', 'not_required', 'partial_refund', 'partially_refunded');
 		return in_array(sanitize_key((string) $status), $payment_states, true)
 			? Luna_Appointments_I18n::payment_status($status)
 			: Luna_Appointments_I18n::booking_status($status);
