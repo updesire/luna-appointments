@@ -287,6 +287,9 @@ class Luna_Appointments_Specialists {
 						isset($values['_luna_specialist_leave_ranges']) ? (string) $values['_luna_specialist_leave_ranges'] : '',
 						isset($values['_luna_specialist_blocked_slots']) ? (string) $values['_luna_specialist_blocked_slots'] : ''
 		);
+		if (class_exists('Luna_Appointments_Specialist_Service_Schedules')) {
+			Luna_Appointments_Specialist_Service_Schedules::render_fields((int) $post->ID, self::get_assigned_service_ids((int) $post->ID));
+		}
                 self::render_reviews_admin_field((int) $post->ID, $values['_luna_specialist_reviews']);
 		self::render_text_field('لینک رزرو', 'luna_specialist_booking_url', $values['_luna_specialist_booking_url']);
 		echo '</div>';
@@ -328,6 +331,10 @@ class Luna_Appointments_Specialists {
 
 		if (class_exists('Luna_Appointments_Services')) {
 			Luna_Appointments_Services::sync_specialist_relationships($post_id, $new_service_ids, $previous_service_ids);
+		}
+		if (class_exists('Luna_Appointments_Specialist_Service_Schedules')) {
+			$timing = isset($_POST['luna_service_timing']) && is_array($_POST['luna_service_timing']) ? wp_unslash($_POST['luna_service_timing']) : array();
+			Luna_Appointments_Specialist_Service_Schedules::save_many($post_id, $timing, $new_service_ids);
 		}
 
                 self::ensure_specialist_user_for_post($post_id);
@@ -775,6 +782,7 @@ class Luna_Appointments_Specialists {
                                                 <strong><?php esc_html_e('برنامه کاری و عدم حضور', 'luna-appointments'); ?></strong>
                                                 <p><?php esc_html_e('روزها، ساعت کاری، تعطیلی‌ها و بازه‌های مسدود خودتان را از همین بخش تنظیم کنید. تاریخ شمسی و میلادی هر دو پذیرفته می‌شوند.', 'luna-appointments'); ?></p>
                                         </div>
+					<?php if (class_exists('Luna_Appointments_Specialist_Service_Schedules')) { Luna_Appointments_Specialist_Service_Schedules::render_fields($specialist_id, self::get_assigned_service_ids($specialist_id), 'service_timing'); } ?>
                                         <div class="specialist-profile-weekdays">
                                                 <?php foreach ($weekdays as $day_index => $label) : ?>
                                                         <label>
@@ -918,6 +926,10 @@ class Luna_Appointments_Specialists {
                 foreach ($updates as $meta_key => $value) {
                         update_post_meta($specialist_id, $meta_key, self::sanitize_meta_value($value, $meta_key));
                 }
+		if (class_exists('Luna_Appointments_Specialist_Service_Schedules')) {
+			$timing = isset($_POST['service_timing']) && is_array($_POST['service_timing']) ? wp_unslash($_POST['service_timing']) : array();
+			Luna_Appointments_Specialist_Service_Schedules::save_many($specialist_id, $timing, self::get_assigned_service_ids($specialist_id));
+		}
 
                 if (! empty($_FILES['profile_image']) && ! empty($_FILES['profile_image']['name'])) {
                         require_once ABSPATH . 'wp-admin/includes/file.php';

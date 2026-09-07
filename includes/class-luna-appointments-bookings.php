@@ -395,22 +395,42 @@ class Luna_Appointments_Bookings {
 			);
 		}
 
-		$duration_minutes = isset($service_meta['_luna_service_duration_minutes']) ? (int) $service_meta['_luna_service_duration_minutes'] : 60;
-		$buffer_minutes   = isset($service_meta['_luna_service_booking_buffer']) ? (int) $service_meta['_luna_service_booking_buffer'] : 0;
-		$candidate_times  = is_array($candidate_times)
-			? array_values(
-				array_filter(
-					array_map(
-						static function ($time) {
-							return preg_match('/^\d{2}:\d{2}$/', (string) $time) ? (string) $time : '';
-						},
-						$candidate_times
-					)
-				)
-			)
-			: array();
+		$timing = class_exists('Luna_Appointments_Specialist_Service_Schedules')
+			? Luna_Appointments_Specialist_Service_Schedules::resolve((int) $specialist_post->ID, (int) $service_post->ID)
+			: array('duration_minutes'=>(int)($service_meta['_luna_service_duration_minutes'] ?? 60),'buffer_minutes'=>(int)($service_meta['_luna_service_booking_buffer'] ?? 0),'slot_step_minutes'=>self::get_booking_slot_step_minutes());
+		$duration_minutes = (int) $timing['duration_minutes'];
+		$buffer_minutes   = (int) $timing['buffer_minutes'];
+		$slot_step_minutes = (int) $timing['slot_step_minutes'];
+		if ($exclude_booking_id > 0 && is_user_logged_in()) {
+			$owned = self::get_booking_for_user($exclude_booking_id, get_current_user_id());
+			if (! is_array($owned) && class_exists('Luna_Appointments_Bookings_Table')) {
+				$candidate_booking = Luna_Appointments_Bookings_Table::get_booking_with_context($exclude_booking_id);
+				$current_specialist_id = class_exists('Luna_Appointments_Specialists')
+					? (int) Luna_Appointments_Specialists::get_current_user_specialist_id()
+					: 0;
+				if (is_array($candidate_booking) && (current_user_can('manage_options') || ($current_specialist_id > 0 && $current_specialist_id === (int) ($candidate_booking['specialist_id'] ?? 0)))) {
+					$owned = $candidate_booking;
+				}
+			}
+			if (is_array($owned)
+				&& (int) ($owned['specialist_id'] ?? 0) === (int) $specialist_post->ID
+				&& (int) ($owned['service_id'] ?? 0) === (int) $service_post->ID
+			) {
+				$duration_minutes  = max(1, (int) ($owned['duration_minutes'] ?? $duration_minutes));
+				$buffer_minutes    = max(0, (int) ($owned['buffer_minutes'] ?? $buffer_minutes));
+				$slot_step_minutes = max(1, (int) ($owned['slot_step_minutes'] ?? $slot_step_minutes));
+			} else {
+				$exclude_booking_id = 0;
+			}
+		} else {
+			$exclude_booking_id = 0;
+		}
+		// Candidate times sent by the browser are deliberately ignored. The server
+		// generates the authoritative list from the selected specialist/service pair.
+		unset($candidate_times);
 
 		$schedule = self::get_specialist_schedule((int) $specialist_post->ID);
+		$candidate_times = self::build_schedule_candidate_times($schedule, $slot_step_minutes, $duration_minutes, $buffer_minutes, $booking_date);
 
 		if (! self::is_specialist_open_for_date($schedule, $booking_date)) {
 			wp_send_json_success(
@@ -420,6 +440,7 @@ class Luna_Appointments_Bookings {
 					'times'        => array_values($candidate_times),
 					'duration'     => $duration_minutes,
 					'buffer'       => $buffer_minutes,
+					'slotStep'     => $slot_step_minutes,
 					'closed'       => true,
 				)
 			);
@@ -434,13 +455,6 @@ class Luna_Appointments_Bookings {
 			)
 		);
 
-		if ($exclude_booking_id > 0 && is_user_logged_in()) {
-			$owned = self::get_booking_for_user($exclude_booking_id, get_current_user_id());
-			$exclude_booking_id = is_array($owned) ? $exclude_booking_id : 0;
-		} else {
-			$exclude_booking_id = 0;
-		}
-
 		$reserved_times = class_exists('Luna_Appointments_Bookings_Table')
 			? Luna_Appointments_Bookings_Table::get_reserved_times((int) $specialist_post->ID, $booking_date, $candidate_times, $duration_minutes, $buffer_minutes, $exclude_booking_id)
 			: array();
@@ -453,6 +467,7 @@ class Luna_Appointments_Bookings {
 				'times'        => array_values($reserved_times),
 				'duration'     => $duration_minutes,
 				'buffer'       => $buffer_minutes,
+				'slotStep'     => $slot_step_minutes,
 			)
 		);
 	}
@@ -651,12 +666,17 @@ class Luna_Appointments_Bookings {
 			);
 		}
 
-		$duration_minutes = isset($service_meta['_luna_service_duration_minutes']) ? (int) $service_meta['_luna_service_duration_minutes'] : 0;
-		$buffer_minutes   = isset($service_meta['_luna_service_booking_buffer']) ? (int) $service_meta['_luna_service_booking_buffer'] : 0;
+		$timing = class_exists('Luna_Appointments_Specialist_Service_Schedules')
+			? Luna_Appointments_Specialist_Service_Schedules::resolve((int) $specialist_post->ID, (int) $service_post->ID)
+			: array('duration_minutes'=>(int)($service_meta['_luna_service_duration_minutes'] ?? 0),'buffer_minutes'=>(int)($service_meta['_luna_service_booking_buffer'] ?? 0),'slot_step_minutes'=>self::get_booking_slot_step_minutes());
+		$duration_minutes = (int) $timing['duration_minutes'];
+		$buffer_minutes   = (int) $timing['buffer_minutes'];
+		$slot_step_minutes = (int) $timing['slot_step_minutes'];
 
 		$schedule = self::get_specialist_schedule((int) $specialist_post->ID);
+		$allowed_start_times = self::build_schedule_candidate_times($schedule, $slot_step_minutes, $duration_minutes, $buffer_minutes, $booking_date);
 
-		if (! self::is_specialist_open_for_date($schedule, $booking_date) || ! self::is_time_allowed_by_schedule($booking_time, $duration_minutes, $buffer_minutes, $schedule, $booking_date)) {
+		if (! self::is_specialist_open_for_date($schedule, $booking_date) || ! in_array($booking_time, $allowed_start_times, true) || ! self::is_time_allowed_by_schedule($booking_time, $duration_minutes, $buffer_minutes, $schedule, $booking_date)) {
 			wp_send_json_error(
 				array(
 					'message' => __('این متخصص در تاریخ یا ساعت انتخاب‌شده امکان ارائه این خدمت را ندارد.', 'luna-appointments'),
@@ -701,6 +721,7 @@ class Luna_Appointments_Bookings {
 			'booking_time'     => $booking_time,
 			'duration_minutes' => max(0, $duration_minutes),
 			'buffer_minutes'   => max(0, $buffer_minutes),
+			'slot_step_minutes'=> max(1, $slot_step_minutes),
 			'base_price'       => max(0, $base_price),
 			'price_label'      => $price_label,
 			'payment_method'   => $normalized_method,
@@ -752,6 +773,7 @@ class Luna_Appointments_Bookings {
 				'booking_time'     => $booking_time,
 				'duration_minutes' => max(0, $duration_minutes),
 				'buffer_minutes'   => max(0, $buffer_minutes),
+				'slot_step_minutes'=> max(1, $slot_step_minutes),
 				'base_price'       => max(0, $base_price),
 				'price_label'      => $price_label,
 				'status'           => $status,
@@ -855,6 +877,7 @@ class Luna_Appointments_Bookings {
 				'booking_time'     => $booking_time,
 				'duration_minutes' => max(0, $duration_minutes),
 				'buffer_minutes'   => max(0, $buffer_minutes),
+				'slot_step_minutes'=> max(1, $slot_step_minutes),
 				'base_price'       => max(0, $base_price),
 				'price_label'      => $price_label,
 				'payment_method'   => $normalized_method,
@@ -916,6 +939,7 @@ class Luna_Appointments_Bookings {
 				'specialistName' => get_the_title($specialist_post),
 				'paymentMethod'  => $normalized_method,
 				'paymentLabel'   => self::get_payment_label($normalized_method),
+				'paymentFlow'    => 'bacs' === $normalized_method ? 'bank_transfer' : 'gateway',
 				'pricing'        => $finance_quote,
 				'status'         => $status,
 				'isConsultation' => $requires_consultation,
@@ -950,7 +974,9 @@ class Luna_Appointments_Bookings {
 		if (! empty($booking['wc_order_id']) && function_exists('wc_get_order')) {
 			$order = wc_get_order((int) $booking['wc_order_id']);
 			if ($order instanceof WC_Order) {
-				$payment_url = self::get_booking_payment_url($order);
+				$payment_url = 'bacs' === (string) $order->get_payment_method()
+					? (string) $order->get_checkout_order_received_url()
+					: self::get_booking_payment_url($order);
 			}
 		}
 
@@ -978,6 +1004,7 @@ class Luna_Appointments_Bookings {
 				'specialistName' => ! empty($booking['specialist_id']) ? get_the_title((int) $booking['specialist_id']) : '',
 				'paymentMethod'  => (string) ($booking['payment_method'] ?? ''),
 				'paymentLabel'   => self::get_payment_label((string) ($booking['payment_method'] ?? '')),
+				'paymentFlow'    => 'bacs' === (string) ($booking['payment_method'] ?? '') ? 'bank_transfer' : 'gateway',
 				'pricing'        => $finance,
 				'status'         => $status,
 				'isConsultation' => $is_consultation,
@@ -1373,6 +1400,20 @@ class Luna_Appointments_Bookings {
 			$times[] = sprintf('%02d:%02d', $hour, $minute);
 		}
 
+		return $times;
+	}
+
+	/** Build authoritative candidates from this specialist/service schedule. */
+	protected static function build_schedule_candidate_times($schedule, $step_minutes, $duration_minutes, $buffer_minutes, $booking_date = '') {
+		$start = isset($schedule['start']) ? self::time_to_minutes((string) $schedule['start']) : null;
+		$end = isset($schedule['end']) ? self::time_to_minutes((string) $schedule['end']) : null;
+		$step = max(1, min(240, (int) $step_minutes));
+		if (null === $start || null === $end || $end <= $start) { return array(); }
+		$times = array();
+		for ($minute = $start; $minute < $end; $minute += $step) {
+			$time = sprintf('%02d:%02d', (int) floor($minute / 60), $minute % 60);
+			if (self::is_time_allowed_by_schedule($time, $duration_minutes, $buffer_minutes, $schedule, $booking_date)) { $times[] = $time; }
+		}
 		return $times;
 	}
 
@@ -1795,7 +1836,9 @@ class Luna_Appointments_Bookings {
 
 		$duration_minutes = isset($booking['duration_minutes']) ? (int) $booking['duration_minutes'] : 0;
 		$buffer_minutes   = isset($booking['buffer_minutes']) ? (int) $booking['buffer_minutes'] : 0;
-		if (! self::is_time_allowed_by_schedule($new_time, $duration_minutes, $buffer_minutes, $schedule, $new_date)) {
+		$slot_step_minutes = max(1, (int) ($booking['slot_step_minutes'] ?? self::get_booking_slot_step_minutes()));
+		$allowed_times = self::build_schedule_candidate_times($schedule, $slot_step_minutes, $duration_minutes, $buffer_minutes, $new_date);
+		if (! in_array($new_time, $allowed_times, true) || ! self::is_time_allowed_by_schedule($new_time, $duration_minutes, $buffer_minutes, $schedule, $new_date)) {
 			return new WP_Error('closed_time', __('این ساعت خارج از بازه کاری متخصص است.', 'luna-appointments'));
 		}
 
@@ -3542,12 +3585,14 @@ class Luna_Appointments_Bookings {
 			$specialist_id     = isset($existing['specialist_id']) ? (int) $existing['specialist_id'] : 0;
 			$duration_minutes  = isset($existing['duration_minutes']) ? (int) $existing['duration_minutes'] : 0;
 			$buffer_minutes    = isset($existing['buffer_minutes']) ? (int) $existing['buffer_minutes'] : 0;
+			$slot_step_minutes = max(1, (int) ($existing['slot_step_minutes'] ?? self::get_booking_slot_step_minutes()));
 			$schedule          = $specialist_id > 0 ? self::get_specialist_schedule($specialist_id) : array();
 
 			if ($specialist_id > 0 && ! self::is_specialist_open_for_date($schedule, $new_date)) {
 				return new WP_Error('booking_closed_date', __('این متخصص در تاریخ انتخاب‌شده فعال نیست.', 'luna-appointments'));
 			}
-					if ($specialist_id > 0 && ! self::is_time_allowed_by_schedule($new_time, $duration_minutes, $buffer_minutes, $schedule, $new_date)) {
+			$allowed_times = self::build_schedule_candidate_times($schedule, $slot_step_minutes, $duration_minutes, $buffer_minutes, $new_date);
+			if ($specialist_id > 0 && (! in_array($new_time, $allowed_times, true) || ! self::is_time_allowed_by_schedule($new_time, $duration_minutes, $buffer_minutes, $schedule, $new_date))) {
 				return new WP_Error('booking_closed_time', __('این ساعت خارج از بازه کاری متخصص است.', 'luna-appointments'));
 			}
 			if ($specialist_id > 0 && Luna_Appointments_Bookings_Table::slot_exists($specialist_id, $new_date, $new_time, $duration_minutes, $buffer_minutes, $booking_id)) {
@@ -4052,6 +4097,7 @@ class Luna_Appointments_Bookings {
 				'booking_time',
 				'duration_minutes',
 				'buffer_minutes',
+				'slot_step_minutes',
 				'base_price',
 				'price_label',
 				'status',
@@ -4843,6 +4889,8 @@ class Luna_Appointments_Bookings {
 		$order->update_meta_data('_luna_booking_date', $booking_date);
 		$order->update_meta_data('_luna_booking_time', $booking_time);
 		$order->update_meta_data('_luna_booking_buffer_minutes', isset($context['buffer_minutes']) ? (int) $context['buffer_minutes'] : 0);
+		$order->update_meta_data('_luna_booking_duration_minutes', isset($context['duration_minutes']) ? (int) $context['duration_minutes'] : 0);
+		$order->update_meta_data('_luna_booking_slot_step_minutes', isset($context['slot_step_minutes']) ? (int) $context['slot_step_minutes'] : self::get_booking_slot_step_minutes());
 		$order->update_meta_data('_luna_booking_price_label', $price_label);
 		$order->update_meta_data('_luna_booking_base_amount', isset($finance_quote['base_amount']) ? (float) $finance_quote['base_amount'] : 0);
 		$order->update_meta_data('_luna_booking_discount_amount', isset($finance_quote['discount_amount']) ? (float) $finance_quote['discount_amount'] : 0);
@@ -4852,6 +4900,19 @@ class Luna_Appointments_Bookings {
 		$order->update_meta_data('_luna_booking_finance_quote', wp_json_encode($finance_quote));
 		$order->calculate_totals(false);
 		$order->save();
+
+		// Direct bank transfer is an offline gateway. There is no external bank
+		// page to open, so complete its booking-side transition here and send the
+		// customer straight to WooCommerce's received page where BACS account
+		// details and instructions are rendered. We intentionally do not call the
+		// gateway's process_payment() because that would empty an unrelated cart.
+		if ('bacs' === $payment_method && $amount > 0 && ! $order->is_paid()) {
+			$order->update_status(
+				'on-hold',
+				__('در انتظار واریز به حساب بانکی و بررسی پرداخت.', 'luna-appointments'),
+				false
+			);
+		}
 
 		$existing_booking = Luna_Appointments_Bookings_Table::get_booking((int) $booking_id);
 		if (! is_array($existing_booking)) {
@@ -4906,10 +4967,14 @@ class Luna_Appointments_Bookings {
 			$context
 		);
 
+		$payment_url = 'bacs' === $payment_method
+			? (string) $order->get_checkout_order_received_url()
+			: self::get_booking_payment_url($order);
+
 		return array(
 			'order_id'     => (int) $order->get_id(),
 			'order_key'    => (string) $order->get_order_key(),
-			'payment_url'  => self::get_booking_payment_url($order),
+			'payment_url'  => $payment_url,
 			'order_status' => (string) $order->get_status(),
 		);
 	}

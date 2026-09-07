@@ -22,7 +22,7 @@ class Luna_Appointments_Bookings_Table {
 	 *
 	 * @var string
 	 */
-	protected static $schema_version = '1.6.0';
+	protected static $schema_version = '1.7.0';
 
 	/**
 	 * Boot runtime hooks.
@@ -252,6 +252,7 @@ class Luna_Appointments_Bookings_Table {
 			'booking_time'     => '',
 			'duration_minutes' => 0,
 			'buffer_minutes'   => 0,
+			'slot_step_minutes'=> 30,
 			'base_price'       => 0,
 			'price_label'      => '',
 			'status'           => 'pending',
@@ -1056,6 +1057,7 @@ class Luna_Appointments_Bookings_Table {
 			'booking_time'     => '%s',
 			'duration_minutes' => '%d',
 			'buffer_minutes'   => '%d',
+			'slot_step_minutes'=> '%d',
 			'base_price'       => '%d',
 			'price_label'      => '%s',
 			'status'           => '%s',
@@ -1203,6 +1205,7 @@ class Luna_Appointments_Bookings_Table {
 			booking_time VARCHAR(10) NOT NULL DEFAULT '',
 			duration_minutes INT UNSIGNED NOT NULL DEFAULT 0,
 			buffer_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+			slot_step_minutes INT UNSIGNED NOT NULL DEFAULT 30,
 			base_price BIGINT UNSIGNED NOT NULL DEFAULT 0,
 			price_label VARCHAR(191) NOT NULL DEFAULT '',
 			status VARCHAR(30) NOT NULL DEFAULT 'pending',
