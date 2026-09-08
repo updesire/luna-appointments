@@ -3,7 +3,7 @@
  * Plugin Name: Luna Appointments
  * Plugin URI: https://rocketzi.com
  * Description: Independent appointment, service, specialist, aftercare, and specialist-app domain for Luna.
- * Version: 1.6.0
+ * Version: 1.6.1
  * Author: Soran
  * Text Domain: luna-appointments
  * Requires Plugins: woocommerce
@@ -15,7 +15,7 @@ if (! defined('ABSPATH')) {
 	exit;
 }
 
-define('LUNA_APPOINTMENTS_VERSION', '1.6.0');
+define('LUNA_APPOINTMENTS_VERSION', '1.6.1');
 define('LUNA_APPOINTMENTS_PATH', plugin_dir_path(__FILE__));
 define('LUNA_APPOINTMENTS_URL', plugin_dir_url(__FILE__));
 
@@ -28,6 +28,7 @@ require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-service-
 require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-bookings-table.php';
 require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-consultation-finance.php';
 require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-bookings.php';
+require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-bacs.php';
 require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-booking-sms.php';
 require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-bookings-admin.php';
 require_once LUNA_APPOINTMENTS_PATH . 'includes/class-luna-appointments-care-plans.php';
@@ -53,6 +54,7 @@ function luna_appointments_boot() {
 	Luna_Appointments_Bookings_Table::boot();
 	Luna_Appointments_Consultation_Finance::boot();
 	Luna_Appointments_Bookings::boot();
+	Luna_Appointments_BACS::boot();
 	Luna_Appointments_Booking_SMS::boot();
 	Luna_Appointments_Care_Plans::boot();
 	Luna_Appointments_Specialist_PWA::boot();
