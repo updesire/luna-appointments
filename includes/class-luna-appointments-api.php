@@ -103,6 +103,13 @@ final class Luna_Appointments_API {
 		return Luna_Appointments_Bookings::should_auto_submit_booking_order_pay($order);
 	}
 
+	/** Return configured direct-bank-transfer details for a WooCommerce order. */
+	public static function bank_transfer_thankyou_markup($order) {
+		return class_exists('Luna_Appointments_BACS')
+			? Luna_Appointments_BACS::get_thankyou_markup($order)
+			: '';
+	}
+
 	public static function is_available() {
 		return true;
 	}

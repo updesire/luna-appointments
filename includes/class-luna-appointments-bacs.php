@@ -56,6 +56,60 @@ final class Luna_Appointments_BACS {
 		}
 	}
 
+	/**
+	 * Return the native WooCommerce BACS instructions and accounts markup.
+	 *
+	 * Custom checkout renderers do not execute WooCommerce's thank-you hooks,
+	 * so consumers can use this public method through Luna_Appointments_API.
+	 *
+	 * @param WC_Order $order WooCommerce order.
+	 * @return string
+	 */
+	public static function get_thankyou_markup($order) {
+		if (! $order instanceof WC_Order || 'bacs' !== (string) $order->get_payment_method()) {
+			return '';
+		}
+
+		$gateway = self::get_gateway();
+		if (! $gateway instanceof WC_Payment_Gateway || ! method_exists($gateway, 'thankyou_page')) {
+			return '';
+		}
+
+		add_filter('woocommerce_bacs_account_fields', array(__CLASS__, 'localize_account_fields'), 20, 2);
+		ob_start();
+		$gateway->thankyou_page($order->get_id());
+		$markup = (string) ob_get_clean();
+		remove_filter('woocommerce_bacs_account_fields', array(__CLASS__, 'localize_account_fields'), 20);
+
+		return $markup;
+	}
+
+	/** Localize the important Iranian transfer fields. */
+	public static function localize_account_fields($fields, $order_id) {
+		unset($order_id);
+		if (! is_array($fields)) {
+			return $fields;
+		}
+
+		if (isset($fields['bank_name'])) {
+			$fields['bank_name']['label'] = __('نام بانک', 'luna-appointments');
+		}
+		if (isset($fields['account_number'])) {
+			$fields['account_number']['label'] = __('شماره کارت / حساب', 'luna-appointments');
+		}
+		if (isset($fields['sort_code'])) {
+			$fields['sort_code']['label'] = __('کد شعبه', 'luna-appointments');
+		}
+		if (isset($fields['iban'])) {
+			$fields['iban']['label'] = __('شماره شبا', 'luna-appointments');
+		}
+		if (isset($fields['bic'])) {
+			$fields['bic']['label'] = __('کد بانکی', 'luna-appointments');
+		}
+
+		return $fields;
+	}
+
 	/** Return the configured WooCommerce BACS gateway instance. */
 	private static function get_gateway() {
 		if (! function_exists('WC') || ! WC() || ! method_exists(WC(), 'payment_gateways')) {
